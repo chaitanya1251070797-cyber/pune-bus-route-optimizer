@@ -1,0 +1,474 @@
+% ============================================================
+% IEEE Conference Paper — IEEEtran LaTeX Template
+% Project: PMPML Pulse — Pune Bus Route Optimizer
+% Authors: Devang Patil, Chaitanya Patil, Divya Patil, Disha Patil
+% Institution: Vishwakarma Institute of Technology, Pune
+% ============================================================
+
+\documentclass[conference]{IEEEtran}
+
+% ---- Packages ----
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{cite}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+\begin{document}
+
+% ---- Title ----
+\title{PMPML Pulse: Crowd-Aware Dynamic Route Optimization and Demand Prediction for Bus Transit in the Pune Metropolitan Region}
+
+% ---- Authors ----
+\author{
+  \IEEEauthorblockN{Devang Patil, Chaitanya Patil, Divya Patil, and Disha Patil}
+  \IEEEauthorblockA{
+    \textit{Department of Computer Engineering}\\
+    \textit{Vishwakarma Institute of Technology}\\
+    Pune 411037, Maharashtra, India\\
+    \{devang.patil, chaitanya.patil, divya.patil, disha.patil\}@vit.edu
+  }
+}
+
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Bus networks in fast-growing Indian cities run on fixed routes and timetables, so they cannot react when demand spikes or an arterial road jams. This paper presents PMPML Pulse, a browser-based tool for crowd-aware route planning and crowd prediction on the Pune Mahanagar Parivahan Mahamandal Ltd. (PMPML) bus network. The network is modelled as a directed weighted graph of 24 transit hubs joined by 38 road corridors. Edge costs combine distance, the predicted crowd density at each end of a corridor, and a chokepoint penalty; these costs drive Dijkstra and A* search, and a BPR-style volume--delay function then estimates travel time. Crowd density comes from a lightweight multiplicative regression model that accounts for hour, day of week, weather, and Pune's festival calendar, and it runs entirely in the browser. Pune Metro Lines 1 and 2 are overlaid for interchange guidance, and a rule-based module suggests extra buses at overloaded hubs. In a simulated monsoon morning-peak scenario on five origin--destination pairs, crowd-aware routes cut modelled travel time by 30.2\% on average (up to 33.8\%) compared with distance-only shortest paths. Across all 552 hub pairs, routing always succeeded, with an average latency of 0.15~ms. Because the crowd model was fitted to synthetic, domain-calibrated data, the results show feasibility rather than field-validated gains; we discuss this limitation and the path to real ridership data.
+\end{abstract}
+
+\begin{IEEEkeywords}
+A* search, BPR function, crowd prediction, Dijkstra's algorithm, intelligent transportation systems, public transit, Pune Metro, route optimization, smart city.
+\end{IEEEkeywords}
+
+% ============================================================
+\section{Introduction}
+
+Pune is one of India's most congested metropolitan areas. It has more than 4.8 million registered vehicles, and PMPML buses carry over a million passengers on a typical day~\cite{pmpml2024}. PMPML runs roughly 1,750 buses on about 315 routes, serving some 6,745 stops across Pune and Pimpri-Chinchwad~\cite{pmpml2024}. All of this runs on fixed routes and timetables.
+
+Fixed schedules work until something breaks the pattern. The morning rush into the Hinjewadi IT park, which employs several hundred thousand people, saturates the same few roads every weekday. Ganeshotsav processions close parts of Kasba Peth and Laxmi Road for hours. Monsoon waterlogging at Swargate and Katraj can stall an entire corridor. In each case buses stay on the congested road, bunch together, overcrowd the platforms ahead, and push the delay onto every route that shares the corridor.
+
+Pune Metro Phase 1 adds another dimension. The Purple Line (PCMC to Swargate) and the Aqua Line (Vanaz to Ramwadi) give riders real alternatives to a jammed road, but bus journey planning does not yet take them into account.
+
+We built PMPML Pulse to explore what a crowd-aware planner could do with no server and no paid data. This paper makes four contributions:
+\begin{enumerate}
+  \item \textbf{Crowd-aware routing.} A Dijkstra cost function that adds predicted crowd density and a chokepoint penalty to distance, so routes bend around saturated corridors, together with a BPR-style travel-time estimate.
+  \item \textbf{A browser-side crowd predictor.} A multiplicative regression model calibrated for Pune's weather, festival calendar, commuting patterns, and hub types.
+  \item \textbf{Metro integration and fleet suggestions.} An overlay of Metro Lines 1 and 2 with feeder-bus guidance, and a rule that turns predicted overcrowding into an extra-bus recommendation.
+  \item \textbf{An offline-capable client.} A Progressive Web App (PWA) that keeps working without connectivity, evaluated over all 552 ordered hub pairs.
+\end{enumerate}
+
+Section~II reviews related work. Sections~III--V describe the architecture, routing method, and crowd model. Section~VI covers metro integration and Section~VII the implementation. Section~VIII presents the evaluation, Section~IX its limitations, and Section~X concludes.
+
+% ============================================================
+\section{Related Work}
+
+\subsection{Graph-Based Transit Routing}
+Dijkstra's shortest-path algorithm~\cite{dijkstra1959} and the A* heuristic search of Hart et al.~\cite{hart1968} underpin most route planners. Both assume fixed edge weights, so using them for transit means making the weights depend on time and conditions. Bast et al.~\cite{bast2016} survey speed-up techniques such as contraction hierarchies, which are very effective on large networks but rely on preprocessing static weights; that does not suit costs that change whenever the hour, weather, or festival input changes. Our graph has only 24 nodes, so we skip preprocessing and recompute costs for every query. For the delay itself we use a simplified form of the Bureau of Public Roads (BPR) volume--delay function~\cite{bpr1964}, driven by predicted crowd density instead of a volume-to-capacity ratio.
+
+\subsection{Transit Demand Prediction}
+Recurrent networks such as LSTM~\cite{hochreiter1997} and tree ensembles such as XGBoost~\cite{chen2016} predict passenger demand well when long, labelled histories exist. We did not have access to PMPML ridership logs, and deep models are awkward to run inside a browser. Sun et al.~\cite{sun2015} showed that a compact wavelet-SVM model can forecast short-term passenger flow on the Beijing subway. We follow that spirit of keeping the model small, but use explicit multiplicative factors that a planner can read, question, and adjust by hand.
+
+\subsection{Indian Urban Transit}
+Work on intelligent routing for Indian bus systems is thin. Heterogeneous, mixed traffic makes delay parameters from Western studies hard to transfer directly; Velmurugan et al.~\cite{velmurugan2010} discuss how this affects roadway capacity estimates on Indian highways. The Smart Cities Mission~\cite{smartcities2023} has funded several intelligent transport deployments, but many are proprietary and depend on dedicated infrastructure. We therefore treat our delay coefficients as tunable assumptions, not validated constants (Section~IX).
+
+% ============================================================
+\section{System Architecture}
+
+PMPML Pulse is a fully client-side PWA. Four layers (Fig.~\ref{fig:architecture}) pass data from the network definition, through crowd prediction and routing, to the interactive map.
+
+\begin{figure}[h]
+\centering
+\fbox{
+\begin{minipage}{0.88\columnwidth}
+\footnotesize
+\textbf{Layer 1 --- Data Ingestion:}\\
+24 Pune Transit Hubs $\cdot$ 38 Arterial Edges $\cdot$ GTFS Data\\
+Maha-Metro Purple \& Aqua Line Coordinates\\[3pt]
+$\downarrow$\\[3pt]
+\textbf{Layer 2 --- ML Crowd Prediction Engine:}\\
+Multiplicative Regression $\cdot$ Weather $\cdot$ Festival $\cdot$ Temporal\\
+Output: Node crowd density $C_u \in [0.05, 1.0]$\\[3pt]
+$\downarrow$\\[3pt]
+\textbf{Layer 3 --- Dynamic Cost Pathfinding:}\\
+Dijkstra $\cdot$ A* Search $\cdot$ BPR Travel-Time Estimate\\
+Avg.\ latency: 0.15~ms $\cdot$ 100\% coverage (552 pairs)\\[3pt]
+$\downarrow$\\[3pt]
+\textbf{Layer 4 --- Interactive Dashboard:}\\
+CARTO Light Map $\cdot$ 3D Tilt $\cdot$ Day/Night Mode $\cdot$ Fleet Sim\\
+Bus Suggester $\cdot$ PDF Travel Slip Export $\cdot$ Offline PWA
+\end{minipage}
+}
+\caption{Architecture of PMPML Pulse across four functional layers.}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Graph Data Model}
+The network is a directed weighted graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$. Each of the 24 nodes in $\mathcal{V}$ is a major Pune or PCMC hub with coordinates, a category (IT corridor, commercial, terminal/interchange, or residential), and a peak-rush multiplier. Each of the 38 directed edges in $\mathcal{E}$ is an arterial corridor with a Haversine distance $D_e$ (km), a free-flow travel time $T_e^{ff}$ (min), a crowd-sensitivity index $S_e \in [0.6, 1.4]$, and a binary chokepoint flag $\chi_e$.
+
+\subsection{Implementation Stack}
+Table~\ref{tab:tech} lists the main components. Map tiles come from CARTO Positron, which is built on OpenStreetMap data~\cite{osm2026, carto2026}.
+
+\begin{table}[h]
+\caption{Technology Stack}
+\label{tab:tech}
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Component} & \textbf{Technology} \\
+\midrule
+Framework   & React 19, TypeScript 5.7 \\
+Build       & Vite 6.2 (vendor/map/icon chunks) \\
+Styling     & Tailwind CSS 3.4 \\
+Mapping     & Leaflet 1.9.4, CARTO Positron \\
+Crowd model & Custom TypeScript regression \\
+Offline     & Service worker (\texttt{sw.js}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Routing Method}
+
+\subsection{Haversine Distance}
+The distance between nodes $u = (\phi_u, \lambda_u)$ and $v = (\phi_v, \lambda_v)$ is:
+\begin{equation}
+D(u,v) = 2R \cdot \operatorname{atan2}\!\left(\sqrt{a},\; \sqrt{1-a}\right)
+\label{eq:haversine}
+\end{equation}
+\begin{equation}
+a = \sin^2\!\left(\frac{\Delta\phi}{2}\right) + \cos\phi_u \cdot \cos\phi_v \cdot \sin^2\!\left(\frac{\Delta\lambda}{2}\right)
+\end{equation}
+where $\Delta\phi = \phi_v - \phi_u$, $\Delta\lambda = \lambda_v - \lambda_u$, and $R = 6{,}371$~km.
+
+\subsection{Crowd Index}
+For every hub $u$ the prediction model returns a crowd density $C_u$ between 0.05 and 1.0. Its inputs are the hour $h$, the day of week $d$, the weather $w$ (clear, light rain, heavy monsoon, waterlogging, extreme heat), and the active festival $F$ (none, Ganeshotsav, Palkhi, Diwali, New Year's Eve, Eid). The model is a product of factors:
+\begin{equation}
+C_u = \operatorname{clip}\!\left(\gamma_u \cdot B_h \cdot M_d \cdot M_w \cdot M_F,\; 0.05,\; 1.0\right)
+\label{eq:crowd}
+\end{equation}
+Here $B_h$ is the base hourly demand curve (0.08--0.95), $\gamma_u = \operatorname{PeakMult}(u)/2.3$ normalizes each hub's rush intensity, and $M_d, M_w, M_F$ are the day-of-week, weather, and festival multipliers. Section~V gives their values.
+
+\subsection{Dynamic Edge Cost}
+Let $\bar{c}_e = (C_u + C_v)/2$ be the mean crowd density at the two ends of edge $e = (u, v)$. The routing cost is:
+\begin{equation}
+\operatorname{Cost}(e) = D_e \left[1 + \alpha\,\bar{c}_e\,S_e + \beta\,(K_e - 1)\right]
+\label{eq:cost}
+\end{equation}
+where $K_e = 1.55$ if the edge is a chokepoint ($\chi_e = 1$) and $\bar{c}_e > 0.55$, and $K_e = 1.00$ otherwise. We set $\alpha = 1.8$ and $\beta = 1.2$ by hand. The baseline is ordinary Dijkstra with $\operatorname{Cost}(e) = D_e$, which ignores crowding altogether.
+
+\subsection{Travel-Time Estimate}
+Once a path is chosen, its expected travel time is the sum over its edges of a BPR-style estimate $T_e$:
+\begin{equation}
+T_e = T_e^{ff} \left[1 + \bar{c}_e^2\,S_e \cdot 2.2 \cdot K_e\right]
+\label{eq:bpr}
+\end{equation}
+For a saturated chokepoint with $\bar{c}_e = 0.85$, $S_e = 1.2$, and $K_e = 1.55$, the bracket is $1 + 0.7225 \times 1.2 \times 2.2 \times 1.55 \approx 3.96$, so an edge that takes 10~min in free flow is modelled as taking about 40~min. This shows why avoiding such edges pays off. Note that Eq.~(\ref{eq:bpr}) is a quadratic form with hand-set constants, not the classical quartic BPR curve with its published coefficients.
+
+\subsection{A* Search}
+The A* variant uses $f(n) = g(n) + h(n)$, where $g(n)$ is the cumulative crowd-aware cost from the source and:
+\begin{equation}
+h(n) = 0.4 \cdot D(n, t)
+\label{eq:heuristic}
+\end{equation}
+with $t$ the target. This heuristic is admissible and consistent: every edge cost in Eq.~(\ref{eq:cost}) is at least $D_e$, $D_e$ is itself a Haversine distance, and great-circle distance obeys the triangle inequality. The factor 0.4 is deliberately conservative; it keeps A* exact but expands more nodes than a factor of 1.0 would. A tighter factor would reduce node expansions but risk inadmissibility if edge costs change between the planning step and the scoring step; the conservative value therefore provides a correctness margin.
+
+\subsection{Complexity}
+With a linear-scan priority queue over $|\mathcal{V}| = 24$ nodes, Dijkstra takes $\mathcal{O}(|\mathcal{V}|^2 + |\mathcal{E}|) = \mathcal{O}(614)$ basic operations. A binary heap would give $\mathcal{O}((|\mathcal{V}| + |\mathcal{E}|) \log |\mathcal{V}|) \approx \mathcal{O}(284)$. At this size either is trivial, which is why every query can be answered live.
+
+% ============================================================
+\section{Crowd Prediction Model}
+
+\subsection{Features}
+The model draws on six groups of features built from knowledge of how Pune commutes.
+
+\textbf{Hourly curve ($B_h$).} It has a morning peak (07:00--10:00), a midday trough (12:00--14:00), an evening peak (17:00--20:00), and a low night tail (21:00--05:00).
+
+\textbf{Hub type ($\gamma_u, M_d$).} Table~\ref{tab:hubtypes} gives each type's peak multiplier and its weekend multiplier, which captures how IT hubs empty out on weekends while market areas fill up.
+
+\begin{table}[h]
+\caption{Hub Types and Day-of-Week Effects}
+\label{tab:hubtypes}
+\centering
+\begin{tabular}{llcc}
+\toprule
+\textbf{Hub Type} & \textbf{Examples} & \textbf{Peak Mult.} & \textbf{Weekend $M_d$} \\
+\midrule
+IT corridor       & Hinjewadi, Kharadi, Magarpatta & 2.8 & 0.38 \\
+Commercial        & Deccan, Camp, FC Road          & 1.8 & 1.45 \\
+Interchange       & Swargate, Shivajinagar, Stn.   & 2.3 & 1.15 \\
+Residential       & Kondhwa, Wagholi, Dhankawadi   & 1.6 & 0.90 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Weather ($M_w$).} Table~\ref{tab:weather} lists the multipliers. Five hubs are flagged as flood-prone: Swargate, Katraj Depot, Bibwewadi, Kondhwa, and Warje.
+
+\begin{table}[h]
+\caption{Weather Multipliers}
+\label{tab:weather}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Condition} & \textbf{Flood-Prone} & \textbf{Other Hubs} \\
+\midrule
+Clear                        & 1.00 & 1.00 \\
+Light rain                   & 1.15 & 1.10 \\
+Heavy monsoon                & 1.55 & 1.30 \\
+Waterlogging                 & 1.70 & 1.40 \\
+Extreme heat (12:00--16:00)  & 0.72 & 0.72 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Festivals ($M_F$).} Each festival boosts a set of hotspot hubs and, for the biggest events, sets a floor on $C_u$ (Table~\ref{tab:festivals}).
+
+\begin{table}[h]
+\caption{Festival Multipliers}
+\label{tab:festivals}
+\centering
+\begin{tabular}{llcc}
+\toprule
+\textbf{Festival} & \textbf{Hotspot Hubs} & $M_F$ & \textbf{Floor $C_u$} \\
+\midrule
+Ganeshotsav       & Swargate, Kasba Peth, Mandai    & 1.85 & 0.88 \\
+Palkhi            & Swargate, Pune Stn., Dehu Rd.   & 1.75 & 0.85 \\
+Diwali            & Deccan, Camp, Viman Nagar       & 1.40 & ---  \\
+New Year's Eve    & Deccan, Camp, Koregaon Park     & 1.65 & 0.82 \\
+Eid               & Camp, Pune Station              & 1.35 & ---  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Season.} Monsoon months (June--September) activate the flood-prone weighting, summer afternoons are damped by the same 0.72 heat factor, and winter lowers early-morning and late-night demand.
+
+\subsection{Fitting}
+No labelled crowd data was available, so the weights in \texttt{crowdModelWeights.json} were fitted to synthetic samples generated from the domain assumptions above (script: \texttt{scripts/train\_crowd\_model.py}). On held-out synthetic samples the mean absolute error is 4.2\% of crowd intensity. That figure tells us the model reproduces its own generating assumptions; it is not an accuracy measure against real crowds. Inference takes under 1~ms per hub in the browser.
+
+\subsection{Extra-Bus Suggestions}
+The predicted crowd percentage $P_u = 100\,C_u$ at a hub is mapped to a suggested number of extra buses. At or above 88\% (critical), the suggestion is:
+\begin{equation}
+R_{\text{extra}} = \operatorname{clip}\!\left(\left\lfloor\frac{P_u - 75}{4}\right\rfloor,\; 3,\; 6\right)
+\label{eq:bus_critical}
+\end{equation}
+and between 72\% and 88\% (high) it is:
+\begin{equation}
+R_{\text{extra}} = \operatorname{clip}\!\left(\left\lfloor\frac{P_u - 65}{6}\right\rfloor,\; 1,\; 3\right)
+\label{eq:bus_high}
+\end{equation}
+Below 72\% no extra buses are suggested. These thresholds are operating heuristics for the demonstration, not values agreed with PMPML.
+
+% ============================================================
+\section{Metro Integration}
+
+Both Phase~1 Metro corridors~\cite{mahamecro2024} are drawn on the map as georeferenced polylines, and interchange hubs are linked to lists of PMPML feeder routes (Table~\ref{tab:metro}). For example, the interface lists routes 100 and 115 toward Hinjewadi, 149 toward Hadapsar, and 103 toward Kondhwa from the relevant interchanges.
+
+\begin{table}[h]
+\caption{Metro Lines and Bus Interchanges}
+\label{tab:metro}
+\centering
+\begin{tabular}{llp{3.2cm}}
+\toprule
+\textbf{Line} & \textbf{Corridor} & \textbf{Bus Interchanges} \\
+\midrule
+Purple (Line~1) & PCMC -- Civil Court -- Swargate & PCMC, Shivajinagar, Civil Court, Swargate \\
+Aqua (Line~2)   & Vanaz -- Nal Stop -- Ramwadi    & Vanaz, Nal Stop, Civil Court, Ramwadi \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Implementation Features}
+
+\textbf{Stop search.} A combobox matches colloquial names to hubs, so ``FC Road'' or ``Fergusson'' resolves to Deccan Gymkhana and ``Phoenix Mall'' to Viman Nagar. Marathi (Devanagari) names such as स्वारगेट are matched by Unicode substring. An in-app algorithm guide modal additionally exposes the cost formulation, time-complexity derivation, and worked viva questions for academic audiences.
+
+\textbf{Visualization.} The map can be tilted with CSS perspective transforms, and a 24-hour slider drives a day/night filter on the base tiles. Commuter flow is shown by CSS-animated dots along the route geometry, which avoids a separate canvas layer.
+
+\textbf{Fleet simulation.} A telemetry panel animates bus markers along stored route geometry, displaying PMPML route numbers (100, 115, 2A, 149, 103), estimated speed, and passenger occupancy as a live card grid. This provides visual confirmation that the computed routes correspond to plausible bus movements on the network.
+
+\textbf{Hourly congestion chart.} A bar chart in the trip-planner panel colours each of the 24 hours green, amber, or red according to the base demand curve $B_h$, giving the user an at-a-glance view of the best time to travel before they commit to a departure time.
+
+\textbf{Offline operation.} A cache-first service worker (\texttt{sw.js}) stores the application bundle, the transit graph and model-weight JSON files, and map tiles fetched in earlier sessions, so routing keeps working without a connection.
+
+\textbf{Route export.} The app builds a printable travel summary with segment directions, per-segment crowd index, total distance, optimized travel time, and time saved against the baseline route. It uses the browser's print function, so no server-side PDF generation is needed.
+
+% ============================================================
+\section{Evaluation}
+
+\subsection{Setup}
+The route benchmark uses a Monday at 08:30, heavy monsoon, with Swargate and University Chowk marked as surge nodes. For each origin--destination pair we compute the distance-only Dijkstra path and the crowd-aware path, and score both with Eq.~(\ref{eq:bpr}). The travel times below are therefore model estimates, not measured bus journeys.
+
+\subsection{Route Optimization}
+Table~\ref{tab:results} compares the two methods on five corridors. Crowd-aware routing reduces modelled time on all five, by 30.2\% on average. The largest gain is Swargate to Hinjewadi Ph~3 (33.8\%), where the crowd-aware path is longer (30.2~km against 26.4~km) but avoids the saturated Swargate chokepoint.
+
+\begin{table}[h]
+\caption{Modelled Travel Time, Monday 08:30, Heavy Monsoon}
+\label{tab:results}
+\centering
+\begin{tabular}{p{2.8cm}cccc}
+\toprule
+\textbf{Route} & \textbf{Std.} & \textbf{Aware} & \textbf{Saved} & \textbf{Reduction} \\
+\midrule
+Swargate $\to$ Hinjewadi Ph 3  & 68.0 & 45.0 & 23.0 & \textbf{33.8\%} \\
+Hadapsar $\to$ Pune Univ.      & 52.0 & 36.0 & 16.0 & \textbf{30.7\%} \\
+Kothrud $\to$ Phoenix Mall     & 48.0 & 34.0 & 14.0 & \textbf{29.1\%} \\
+Nigdi $\to$ Swargate           & 60.0 & 42.0 & 18.0 & \textbf{30.0\%} \\
+Lohegaon $\to$ Deccan          & 55.0 & 40.0 & 15.0 & \textbf{27.3\%} \\
+\midrule
+\textbf{Average}               & \textbf{56.6} & \textbf{39.4} & \textbf{17.2} & \textbf{30.2\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\fbox{
+\begin{minipage}{0.88\columnwidth}
+\footnotesize
+\textbf{Corridor Comparison (Std.\ vs.\ Aware travel time):}\\
+1. Swargate $\to$ Hinjewadi: 68~min vs.\ \textbf{45~min} ($-$33.8\%)\\
+2. Hadapsar $\to$ Pune Univ.: 52~min vs.\ \textbf{36~min} ($-$30.7\%)\\
+3. Kothrud $\to$ Phoenix Mall: 48~min vs.\ \textbf{34~min} ($-$29.1\%)\\
+4. Nigdi $\to$ Swargate: 60~min vs.\ \textbf{42~min} ($-$30.0\%)\\
+5. Lohegaon $\to$ Deccan: 55~min vs.\ \textbf{40~min} ($-$27.3\%)\\[3pt]
+\textit{Average: 56.6~min baseline vs.\ 39.4~min crowd-aware (30.2\% saved).}
+\end{minipage}
+}
+\caption{Modelled travel time under distance-only and crowd-aware routing (Monday 08:30, heavy monsoon, Swargate and University Chowk marked as surge nodes). Percentage labels show the reduction relative to the distance-only baseline.}
+\label{fig:results}
+\end{figure}
+
+\subsection{Routing Speed and Coverage}
+We ran the routing engine on every ordered pair of the 24 hubs using the project's test script (\texttt{scripts/test\_route\_matrix.py}). Table~\ref{tab:speed} summarizes the run. Zero failures is expected because the graph is strongly connected; the test mainly confirms that the edge data contains no gaps.
+
+\begin{table}[h]
+\caption{Routing Benchmark, All Hub Pairs}
+\label{tab:speed}
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Metric} & \textbf{Result} \\
+\midrule
+Pairs tested ($24 \times 23$) & 552 \\
+Successful routes              & \textbf{552 (100\%)} \\
+Disconnected pairs             & \textbf{0} \\
+Average latency                & \textbf{0.15~ms} \\
+Maximum latency                & \textbf{0.55~ms} \\
+Total batch time               & \textbf{0.07~s} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Plausibility of Crowd Predictions}
+Without ground-truth crowd data we checked that predictions behave sensibly in five scenarios (Table~\ref{tab:plausibility}). Every case lands where the underlying assumptions say it should, which confirms the factors combine as intended but is not an independent validation.
+
+\begin{table}[h]
+\caption{Crowd Prediction Spot Checks}
+\label{tab:plausibility}
+\centering
+\begin{tabular}{p{4.2cm}cl}
+\toprule
+\textbf{Scenario} & $C_u$ & \textbf{Expected Behavior} \\
+\midrule
+Hinjewadi, Sat 14:00, clear       & 0.08 & Low (IT hub, weekend) \\
+Swargate, Ganeshotsav, 20:00     & 0.94 & Critical (festival) \\
+Deccan, Sun 15:00, clear          & 0.72 & Heavy (leisure hub) \\
+Swargate, Mon 09:00, heavy monsoon& 0.91 & Critical (flood-prone, peak) \\
+Hinjewadi, Mon 09:00, clear       & 0.78 & Heavy (IT rush) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Emissions}
+Routing around stop-and-go corridors should lower fuel use, but a longer detour adds distance. We estimate trip emissions as:
+\begin{equation}
+E = D_{\text{tot}} \cdot \varepsilon \cdot \left(1 + 0.4\,\bar{c}_r\right)
+\label{eq:emissions}
+\end{equation}
+where $D_{\text{tot}}$ is path length, $\varepsilon$ is an emission factor per kilometre, and $\bar{c}_r$ is the mean crowd index along the route. The prototype's emission factor has not yet been checked against measured PMPML fuel data, so we do not report absolute CO$_2$ figures here.
+
+% ============================================================
+\section{Limitations}
+
+The results should be read with the following caveats in mind.
+\begin{enumerate}
+  \item \textbf{Synthetic training data.} The crowd model encodes our assumptions about Pune; it has not been fitted to or tested against observed ridership.
+  \item \textbf{Self-consistent evaluation.} The same crowd and delay parameters both choose the route and score it, so the time savings show that the optimizer does what the model says, not that real buses would save 30\%.
+  \item \textbf{Hand-set coefficients.} $\alpha$, $\beta$, the 2.2 delay constant, and the chokepoint threshold were not fitted, and we have not run a sensitivity analysis.
+  \item \textbf{Coarse network.} Twenty-four hubs stand in for more than 6,700 stops. The model has no timetables, headways, transfer waits, or vehicle capacities, and it uses passenger crowd density as a stand-in for road congestion.
+  \item \textbf{No live data.} Conditions are chosen by the user, not read from vehicle-tracking or ticketing feeds.
+\end{enumerate}
+
+% ============================================================
+\section{Conclusion and Future Work}
+
+PMPML Pulse shows that crowd-aware bus routing, crowd prediction, metro guidance, and fleet suggestions can run entirely in a browser with no server or paid APIs. In simulation, crowd-aware routing cut modelled travel time by 30.2\% on average on five corridors, and every one of the 552 hub pairs was routed in well under a millisecond. These are feasibility results; real-world gains remain to be shown.
+
+The next steps follow from the limitations above:
+\begin{enumerate}
+  \item Ingest PMPML's GTFS-Realtime vehicle-location feeds for live positions and rerouting;
+  \item Calibrate and test the crowd model against Maha-Metro smart-card counts and PMPML ticketing data;
+  \item Replace the regression with a learned sequence model once such data exists, and conduct a sensitivity analysis on the hand-set coefficients $\alpha$, $\beta$, and the 2.2 delay constant;
+  \item Model signal priority on high-occupancy corridors; and
+  \item Release a passenger-facing mobile PWA with push alerts for diversions and crowding.
+\end{enumerate}
+
+% ============================================================
+\begin{thebibliography}{99}
+
+\bibitem{pmpml2024}
+PMPML, \textit{Annual Report 2023--24}. Pune, India: Pune Mahanagar Parivahan Mahamandal Ltd., 2024.
+
+\bibitem{dijkstra1959}
+E.~W. Dijkstra, ``A note on two problems in connexion with graphs,'' \textit{Numerische Mathematik}, vol.~1, no.~1, pp.~269--271, 1959.
+
+\bibitem{hart1968}
+P.~E. Hart, N.~J. Nilsson, and B.~Raphael, ``A formal basis for the heuristic determination of minimum cost paths,'' \textit{IEEE Trans. Syst. Sci. Cybern.}, vol.~4, no.~2, pp.~100--107, Jul. 1968.
+
+\bibitem{bast2016}
+H.~Bast \textit{et al.}, ``Route planning in transportation networks,'' in \textit{Algorithm Engineering}, L.~Kliemann and P.~Sanders, Eds. Cham, Switzerland: Springer, 2016, pp.~19--80.
+
+\bibitem{bpr1964}
+Bureau of Public Roads, \textit{Traffic Assignment Manual}. Washington, DC, USA: U.S. Dept. of Commerce, 1964.
+
+\bibitem{hochreiter1997}
+S.~Hochreiter and J.~Schmidhuber, ``Long short-term memory,'' \textit{Neural Comput.}, vol.~9, no.~8, pp.~1735--1780, 1997.
+
+\bibitem{chen2016}
+T.~Chen and C.~Guestrin, ``XGBoost: A scalable tree boosting system,'' in \textit{Proc. 22nd ACM SIGKDD Int. Conf. Knowl. Discovery Data Mining}, San Francisco, CA, USA, 2016, pp.~785--794.
+
+\bibitem{sun2015}
+Y.~Sun, B.~Leng, and W.~Guan, ``A novel wavelet-SVM short-time passenger flow prediction in Beijing subway system,'' \textit{Neurocomputing}, vol.~166, pp.~109--121, 2015.
+
+\bibitem{velmurugan2010}
+S.~Velmurugan, E.~Madhu, V.~Ravinder, and K.~Sitaramanjaneyulu, ``Critical evaluation of roadway capacity of national highways under heterogeneous and mixed traffic conditions through traditional and microscopic simulation models,'' \textit{J. Indian Roads Congr.}, vol.~71, no.~2, pp.~235--264, 2010.
+
+\bibitem{smartcities2023}
+Ministry of Housing and Urban Affairs, Govt. of India, ``Smart Cities Mission: Annual report 2022--23,'' New Delhi, India, 2023.
+
+\bibitem{mahamecro2024}
+Maharashtra Metro Rail Corporation Ltd., ``Pune Metro Rail Phase 1 operations report,'' Pune, India, 2024.
+
+\bibitem{osm2026}
+OpenStreetMap Contributors, ``OpenStreetMap.'' [Online]. Available: \url{https://www.openstreetmap.org} (accessed Nov. 2026).
+
+\bibitem{carto2026}
+CARTO, ``CARTO basemaps: Positron and Dark Matter.'' [Online]. Available: \url{https://carto.com/basemaps} (accessed Nov. 2026).
+
+\end{thebibliography}
+
+\end{document}
